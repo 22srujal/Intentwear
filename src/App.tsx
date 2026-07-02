@@ -42,6 +42,25 @@ type CartItem = ProductDetail & {
   quantity: number;
 };
 
+function useIsMobileViewport() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(max-width: 640px)").matches
+      : false,
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateViewport = () => setIsMobile(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  return isMobile;
+}
+
 const heroStats = [
   ["2021", "Founded"],
   ["38°C", "Designed for"],
@@ -465,6 +484,13 @@ function Nav({
       </a>
       <div className="nav-links" aria-label="Primary navigation">
         <a
+          className={active === "journal" ? "active" : undefined}
+          href="/"
+          onClick={(event) => onNavigate(event, "/")}
+        >
+          Home
+        </a>
+        <a
           className={active === "shop" ? "active" : undefined}
           href="/shop"
           onClick={(event) => onNavigate(event, "/shop")}
@@ -477,12 +503,6 @@ function Nav({
           onClick={(event) => onNavigate(event, "/about")}
         >
           About
-        </a>
-        <a
-          className={active === "journal" ? "active" : undefined}
-          href="#journal"
-        >
-          Journal
         </a>
       </div>
       <div className="nav-actions" aria-label="Account and cart">
@@ -708,25 +728,28 @@ function ProductShowcase({
     options?: { size?: string; color?: string; quantity?: number },
   ) => void;
 }) {
+  const isMobile = useIsMobileViewport();
+
   return (
     <section className="featured-drop" aria-labelledby="featured-title">
       <div className="leaf-field" aria-hidden="true" />
       <div className="antigravity-field" aria-hidden="true">
         <Antigravity
-          count={180}
-          magnetRadius={6}
-          ringRadius={7}
-          waveSpeed={0.32}
-          waveAmplitude={0.8}
-          particleSize={1.95}
-          lerpSpeed={0.055}
+          count={isMobile ? 72 : 180}
+          magnetRadius={isMobile ? 3.8 : 6}
+          ringRadius={isMobile ? 4.5 : 7}
+          waveSpeed={isMobile ? 0.24 : 0.32}
+          waveAmplitude={isMobile ? 0.42 : 0.8}
+          particleSize={isMobile ? 0.72 : 1.95}
+          lerpSpeed={isMobile ? 0.035 : 0.055}
           color="#1a3528"
           autoAnimate
-          particleVariance={0.75}
-          rotationSpeed={0.08}
-          depthFactor={0.65}
+          particleVariance={isMobile ? 0.35 : 0.75}
+          rotationSpeed={isMobile ? 0.035 : 0.08}
+          depthFactor={isMobile ? 0.32 : 0.65}
           particleShape="capsule"
-          fieldStrength={8}
+          fieldStrength={isMobile ? 5 : 8}
+          disablePointer={isMobile}
         />
       </div>
       <p className="section-label" id="featured-title">

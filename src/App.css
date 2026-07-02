@@ -2643,6 +2643,32 @@ video.home-hero-image {
     padding: 72px 18px;
   }
 
+  .antigravity-field {
+    top: 72px;
+    bottom: auto;
+    left: 50%;
+    width: min(92vw, 360px);
+    height: 520px;
+    opacity: 0.38;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    transform: translateX(-50%) scale(0.72);
+    transform-origin: top center;
+  }
+
+  .antigravity-field canvas {
+    pointer-events: none;
+  }
+
+  .leaf-field {
+    opacity: 0.14;
+    background:
+      radial-gradient(ellipse 7px 40px at 8% 30%, rgba(26, 53, 40, 0.38) 0 35%, transparent 36%),
+      radial-gradient(ellipse 7px 38px at 91% 30%, rgba(26, 53, 40, 0.32) 0 35%, transparent 36%),
+      radial-gradient(ellipse 8px 46px at 12% 78%, rgba(26, 53, 40, 0.36) 0 35%, transparent 36%),
+      radial-gradient(ellipse 8px 48px at 88% 74%, rgba(26, 53, 40, 0.3) 0 35%, transparent 36%);
+  }
+
   .featured-grid {
     max-width: 320px;
   }

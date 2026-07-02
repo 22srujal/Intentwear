@@ -19,6 +19,7 @@ type AntigravityProps = {
   pulseSpeed?: number;
   particleShape?: "capsule" | "sphere" | "box" | "tetrahedron";
   fieldStrength?: number;
+  disablePointer?: boolean;
 };
 
 type Particle = {
@@ -49,6 +50,7 @@ function AntigravityInner({
   pulseSpeed = 3,
   particleShape = "capsule",
   fieldStrength = 10,
+  disablePointer = false,
 }: AntigravityProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const { viewport } = useThree();
@@ -94,19 +96,21 @@ function AntigravityInner({
     }
 
     const { viewport: v, pointer: m } = state;
+    const pointer = disablePointer ? { x: 0, y: 0 } : m;
     const mouseDist = Math.sqrt(
-      (m.x - lastMousePos.current.x) ** 2 + (m.y - lastMousePos.current.y) ** 2,
+      (pointer.x - lastMousePos.current.x) ** 2 +
+        (pointer.y - lastMousePos.current.y) ** 2,
     );
 
-    if (mouseDist > 0.001) {
+    if (!disablePointer && mouseDist > 0.001) {
       lastMouseMoveTime.current = Date.now();
-      lastMousePos.current = { x: m.x, y: m.y };
+      lastMousePos.current = { x: pointer.x, y: pointer.y };
     }
 
-    let destX = (m.x * v.width) / 2;
-    let destY = (m.y * v.height) / 2;
+    let destX = (pointer.x * v.width) / 2;
+    let destY = (pointer.y * v.height) / 2;
 
-    if (autoAnimate && Date.now() - lastMouseMoveTime.current > 2000) {
+    if (autoAnimate && (disablePointer || Date.now() - lastMouseMoveTime.current > 2000)) {
       const time = state.clock.getElapsedTime();
       destX = Math.sin(time * 0.5) * (v.width / 4);
       destY = Math.cos(time) * (v.height / 4);
