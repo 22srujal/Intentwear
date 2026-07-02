@@ -457,7 +457,7 @@ function Nav({
   cartMessage,
   onOpenBag,
 }: {
-  active?: "shop" | "about" | "journal";
+  active?: "home" | "shop" | "about" | "journal";
   navigate: (route: Route, hash?: string) => void;
   cartCount: number;
   cartMessage?: string;
@@ -484,7 +484,7 @@ function Nav({
       </a>
       <div className="nav-links" aria-label="Primary navigation">
         <a
-          className={active === "journal" ? "active" : undefined}
+          className={active === "home" ? "active" : undefined}
           href="/"
           onClick={(event) => onNavigate(event, "/")}
         >
@@ -552,7 +552,7 @@ function HomePage({
       data-name="Main landing page"
     >
       <Nav
-        active="shop"
+        active="home"
         navigate={navigate}
         cartCount={cartCount}
         cartMessage={cartMessage}
