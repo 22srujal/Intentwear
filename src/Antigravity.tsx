@@ -110,7 +110,10 @@ function AntigravityInner({
     let destX = (pointer.x * v.width) / 2;
     let destY = (pointer.y * v.height) / 2;
 
-    if (autoAnimate && (disablePointer || Date.now() - lastMouseMoveTime.current > 2000)) {
+    if (
+      autoAnimate &&
+      (disablePointer || Date.now() - lastMouseMoveTime.current > 2000)
+    ) {
       const time = state.clock.getElapsedTime();
       destX = Math.sin(time * 0.5) * (v.width / 4);
       destY = Math.cos(time) * (v.height / 4);
@@ -140,14 +143,17 @@ function AntigravityInner({
 
       if (dist < magnetRadius) {
         const angle = Math.atan2(dy, dx) + globalRotation;
-        const wave = Math.sin(particle.t * waveSpeed + angle) * (0.5 * waveAmplitude);
-        const deviation = particle.randomRadiusOffset * (5 / (fieldStrength + 0.1));
+        const wave =
+          Math.sin(particle.t * waveSpeed + angle) * (0.5 * waveAmplitude);
+        const deviation =
+          particle.randomRadiusOffset * (5 / (fieldStrength + 0.1));
         const currentRingRadius = ringRadius + wave + deviation;
 
         targetPos.x = projectedTargetX + currentRingRadius * Math.cos(angle);
         targetPos.y = projectedTargetY + currentRingRadius * Math.sin(angle);
         targetPos.z =
-          particle.mz * depthFactor + Math.sin(particle.t) * (waveAmplitude * depthFactor);
+          particle.mz * depthFactor +
+          Math.sin(particle.t) * (waveAmplitude * depthFactor);
       }
 
       particle.cx += (targetPos.x - particle.cx) * lerpSpeed;
@@ -159,7 +165,8 @@ function AntigravityInner({
       dummy.rotateX(Math.PI / 2);
 
       const currentDistToMouse = Math.sqrt(
-        (particle.cx - projectedTargetX) ** 2 + (particle.cy - projectedTargetY) ** 2,
+        (particle.cx - projectedTargetX) ** 2 +
+          (particle.cy - projectedTargetY) ** 2,
       );
       const distFromRing = Math.abs(currentDistToMouse - ringRadius);
       const scaleFactor = Math.max(0, Math.min(1, 1 - distFromRing / 10));
@@ -178,7 +185,9 @@ function AntigravityInner({
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      {particleShape === "capsule" && <capsuleGeometry args={[0.1, 0.4, 4, 8]} />}
+      {particleShape === "capsule" && (
+        <capsuleGeometry args={[0.1, 0.4, 4, 8]} />
+      )}
       {particleShape === "sphere" && <sphereGeometry args={[0.2, 16, 16]} />}
       {particleShape === "box" && <boxGeometry args={[0.3, 0.3, 0.3]} />}
       {particleShape === "tetrahedron" && <tetrahedronGeometry args={[0.3]} />}

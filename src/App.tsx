@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useState } from "react";
+import { MouseEvent, useEffect, useRef, useState } from "react";
 import Antigravity from "./Antigravity";
 import heroVideo from "./assets/hero-main.mp4";
 import bambooGrove from "./assets/bamboo-grove.png";
@@ -16,7 +16,7 @@ import shopCroppedBambooTee from "./assets/shop-cropped-bamboo-tee.png";
 import shopLonglineBambooShirt from "./assets/shop-longline-bamboo-shirt.png";
 import shopTaperedJogger from "./assets/shop-tapered-jogger.png";
 
-type Route = "/" | "/shop" | "/about";
+type Route = "/" | "/shop" | "/about" | "/account";
 type ShopFilter = "All" | "Tees" | "Oversized" | "Henleys" | "Bottoms";
 type SortMode = "Featured" | "Price: Low";
 type ProductDetail = {
@@ -59,6 +59,158 @@ function useIsMobileViewport() {
   }, []);
 
   return isMobile;
+}
+
+function CountUp({
+  to,
+  from = 0,
+  direction = "up",
+  delay = 0,
+  duration = 1.15,
+  className = "",
+  startWhen = true,
+  separator = "",
+}: {
+  to: number;
+  from?: number;
+  direction?: "up" | "down";
+  delay?: number;
+  duration?: number;
+  className?: string;
+  startWhen?: boolean;
+  separator?: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [value, setValue] = useState(direction === "down" ? to : from);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || !startWhen) {
+      return;
+    }
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const startValue = direction === "down" ? to : from;
+    const endValue = direction === "down" ? from : to;
+
+    if (reduceMotion) {
+      setValue(endValue);
+      return;
+    }
+
+    let frameId = 0;
+    let timeoutId = 0;
+    const startCounter = () => {
+      const startTime = performance.now();
+      const durationMs = duration * 1000;
+
+      const tick = (time: number) => {
+        const progress = Math.min((time - startTime) / durationMs, 1);
+        const easedProgress = 1 - (1 - progress) ** 3;
+        setValue(
+          Math.round(startValue + (endValue - startValue) * easedProgress),
+        );
+
+        if (progress < 1) {
+          frameId = requestAnimationFrame(tick);
+        }
+      };
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          timeoutId = window.setTimeout(startCounter, delay * 1000);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.45 },
+    );
+
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timeoutId);
+      cancelAnimationFrame(frameId);
+    };
+  }, [delay, direction, duration, from, startWhen, to]);
+
+  const formattedValue = new Intl.NumberFormat("en-US").format(value);
+
+  return (
+    <span className={className} ref={ref}>
+      {separator ? formattedValue.replace(/,/g, separator) : formattedValue}
+    </span>
+  );
+}
+
+function AnimatedList({
+  items,
+}: {
+  items: string[][];
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [visibleItems, setVisibleItems] = useState<Set<number>>(() => new Set());
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) {
+      setVisibleItems(new Set(items.map((_, index) => index)));
+      return;
+    }
+
+    const cards = Array.from(list.querySelectorAll<HTMLElement>("[data-list-index]"));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const index = Number((entry.target as HTMLElement).dataset.listIndex);
+            setVisibleItems((current) => new Set(current).add(index));
+          }
+        });
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.28 },
+    );
+
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [items]);
+
+  return (
+    <div className="timeline-grid animated-list" ref={listRef}>
+      {items.map(([title, text], index) => (
+        <article
+          className={
+            visibleItems.has(index)
+              ? index === selectedIndex
+                ? "timeline-card animated-list-item visible selected"
+                : "timeline-card animated-list-item visible"
+              : "timeline-card animated-list-item"
+          }
+          data-list-index={index}
+          key={title}
+          onClick={() => setSelectedIndex(index)}
+          onMouseEnter={() => setSelectedIndex(index)}
+          tabIndex={0}
+          onFocus={() => setSelectedIndex(index)}
+        >
+          <span>{String(index + 1).padStart(2, "0")}</span>
+          <h3>{title}</h3>
+          <p>{text}</p>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 const heroStats = [
@@ -311,6 +463,10 @@ function normalizePath(pathname: string): Route {
     return "/shop";
   }
 
+  if (pathname === "/account") {
+    return "/account";
+  }
+
   return pathname === "/about" ? "/about" : "/";
 }
 
@@ -407,6 +563,13 @@ function App() {
         cartCount={cartCount}
         onOpenBag={() => setIsBagOpen(true)}
       />
+    ) : route === "/account" ? (
+      <AccountPage
+        navigate={navigate}
+        cartCount={cartCount}
+        cartMessage={cartMessage}
+        onOpenBag={() => setIsBagOpen(true)}
+      />
     ) : route === "/shop" ? (
       <ShopPage
         navigate={navigate}
@@ -457,7 +620,7 @@ function Nav({
   cartMessage,
   onOpenBag,
 }: {
-  active?: "home" | "shop" | "about" | "journal";
+  active?: "home" | "shop" | "about" | "account" | "journal";
   navigate: (route: Route, hash?: string) => void;
   cartCount: number;
   cartMessage?: string;
@@ -515,12 +678,10 @@ function Nav({
           onClick={onOpenBag}
         />
         <button
-          className="account-button"
+          className={active === "account" ? "account-button active" : "account-button"}
           aria-label="Account"
           type="button"
-          onClick={() =>
-            setTimeout(() => alert("Account sign-in is coming soon."), 0)
-          }
+          onClick={() => navigate("/account")}
         />
       </div>
     </nav>
@@ -747,7 +908,7 @@ function ProductShowcase({
           particleVariance={isMobile ? 0.35 : 0.75}
           rotationSpeed={isMobile ? 0.035 : 0.08}
           depthFactor={isMobile ? 0.32 : 0.65}
-          particleShape="capsule"
+          particleShape="tetrahedron"
           fieldStrength={isMobile ? 5 : 8}
           disablePointer={isMobile}
         />
@@ -1391,15 +1552,24 @@ function AboutPage({
             </div>
             <div className="mini-metrics">
               <div>
-                <strong>22</strong>
+                <strong>
+                  <CountUp to={22} className="count-up-text" />
+                </strong>
                 <span>Prototypes before launch</span>
               </div>
               <div>
-                <strong>70/30</strong>
+                <strong className="composition-count">
+                  <CountUp to={70} className="count-up-text" />
+                  <span aria-hidden="true">/</span>
+                  <CountUp to={30} className="count-up-text" />
+                </strong>
                 <span>Bamboo cotton composition</span>
               </div>
               <div>
-                <strong>3x</strong>
+                <strong>
+                  <CountUp to={3} className="count-up-text" />
+                  <span aria-hidden="true">x</span>
+                </strong>
                 <span>Sold out in 90 days</span>
               </div>
             </div>
@@ -1466,15 +1636,7 @@ function AboutPage({
               Stalk to shirt -<span>six steps.</span>
             </h2>
           </div>
-          <div className="timeline-grid">
-            {process.map(([title, text], index) => (
-              <article className="timeline-card" key={title}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <h3>{title}</h3>
-                <p>{text}</p>
-              </article>
-            ))}
-          </div>
+          <AnimatedList items={process} />
         </section>
 
         <section className="values-section">
@@ -1501,6 +1663,130 @@ function AboutPage({
           <a className="cta-button" href="/shop">
             Shop the collection +
           </a>
+        </section>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
+function AccountPage({
+  navigate,
+  cartCount,
+  cartMessage,
+  onOpenBag,
+}: {
+  navigate: (route: Route, hash?: string) => void;
+  cartCount: number;
+  cartMessage: string;
+  onOpenBag: () => void;
+}) {
+  const recentOrders = [
+    ["#INT-2047", "Bamboo Everyday Tee", "Delivered"],
+    ["#INT-1988", "Relaxed Henley", "In transit"],
+  ];
+
+  return (
+    <div className="page-shell account-page" data-name="Account page">
+      <Nav
+        active="account"
+        navigate={navigate}
+        cartCount={cartCount}
+        cartMessage={cartMessage}
+        onOpenBag={onOpenBag}
+      />
+      <main>
+        <section className="account-hero">
+          <div>
+            <p className="section-label">Account</p>
+            <h1>
+              Your Intent,
+              <span>kept simple.</span>
+            </h1>
+            <p>
+              Sign in to track orders, save sizes, and keep your bamboo basics
+              ready for the next drop.
+            </p>
+          </div>
+          <div className="account-status">
+            <span>Bag</span>
+            <strong>{cartCount}</strong>
+            <p>{cartMessage}</p>
+          </div>
+        </section>
+
+        <section className="account-grid" aria-label="Account tools">
+          <article className="account-panel sign-in-panel">
+            <p className="section-label">Sign in</p>
+            <h2>Continue with email</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+              }}
+            >
+              <label>
+                Email address
+                <input type="email" placeholder="you@email.com" />
+              </label>
+              <button type="submit">Send sign-in link</button>
+            </form>
+            <p>
+              Passwordless access keeps your order history and saved fit profile
+              in one place.
+            </p>
+          </article>
+
+          <article className="account-panel">
+            <p className="section-label">Orders</p>
+            <h2>Recent activity</h2>
+            <div className="order-list">
+              {recentOrders.map(([id, item, status]) => (
+                <div className="order-row" key={id}>
+                  <div>
+                    <strong>{id}</strong>
+                    <span>{item}</span>
+                  </div>
+                  <p>{status}</p>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={() => navigate("/shop")}>
+              Shop again
+            </button>
+          </article>
+
+          <article className="account-panel">
+            <p className="section-label">Fit profile</p>
+            <h2>Saved sizes</h2>
+            <div className="size-prefs">
+              {["Tops M", "Henley M", "Bottoms L"].map((size) => (
+                <span key={size}>{size}</span>
+              ))}
+            </div>
+            <p>
+              We will preselect these when you open a product, so repeat orders
+              take less thinking.
+            </p>
+          </article>
+
+          <article className="account-panel">
+            <p className="section-label">Preferences</p>
+            <h2>Drop alerts</h2>
+            <div className="preference-list">
+              <label>
+                <input type="checkbox" defaultChecked />
+                New bamboo tees
+              </label>
+              <label>
+                <input type="checkbox" defaultChecked />
+                Restock reminders
+              </label>
+              <label>
+                <input type="checkbox" />
+                Care notes
+              </label>
+            </div>
+          </article>
         </section>
       </main>
       <Footer />
