@@ -2151,7 +2151,10 @@ function AdminPage({ navigate }: { navigate: (route: Route, hash?: string) => vo
         isChecking={isChecking}
         message={message}
         onMessage={setMessage}
-        onSuccess={() => {
+        onSuccess={(nextSession) => {
+          setSession(nextSession);
+          setIsAdmin(true);
+          setIsChecking(false);
           window.history.replaceState({}, "", "/admin");
           navigate("/admin");
         }}
@@ -2189,7 +2192,7 @@ function AdminLogin({
   isChecking: boolean;
   message: string;
   onMessage: (message: string) => void;
-  onSuccess: () => void;
+  onSuccess: (session: Session) => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -2231,7 +2234,7 @@ function AdminLogin({
                 return;
               }
 
-              onSuccess();
+              onSuccess(data.session);
             } catch (error) {
               console.error("Admin sign in failed", error);
               const message = readableError(error);
