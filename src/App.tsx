@@ -4,14 +4,19 @@ import Antigravity from "./Antigravity";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import {
   CmsContentRow,
+  CmsOrder,
   CmsProductInput,
   CmsProductRow,
+  OrderStatus,
   deleteProduct,
   fetchAdminProfile,
   fetchAllProducts,
+  fetchAllOrders,
   fetchContentBlocks,
+  fetchCustomerOrders,
   fetchPublishedProducts,
   saveContentBlock,
+  updateOrderStatus,
   uploadProductImage,
   upsertProduct,
 } from "./lib/cms";
@@ -56,11 +61,53 @@ type ProductDetail = {
   sizes?: string[];
 };
 type CartItem = ProductDetail & {
-  id: string;
+  cartId: string;
   size: string;
   color: string;
   quantity: number;
 };
+
+type DeliveryDetails = {
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+};
+
+type CheckoutStatus = {
+  state: "idle" | "creating" | "verifying";
+  message: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: {
+    name?: string;
+    email?: string;
+    contact?: string;
+  };
+  handler: (response: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) => void;
+  modal?: {
+    ondismiss?: () => void;
+  };
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => { open: () => void };
+  }
+}
 
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(() =>
@@ -633,6 +680,35 @@ function adminLoginHint(message: string) {
   return "";
 }
 
+function loadRazorpayScript() {
+  if (window.Razorpay) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]',
+    );
+
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Could not load Razorpay Checkout.")),
+        { once: true },
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load Razorpay Checkout."));
+    document.body.appendChild(script);
+  });
+}
+
 function splitTitle(value: string, fallback: string) {
   const title = value || fallback;
   const separator = title.includes(", ") ? ", " : title.includes(". ") ? ". " : "";
@@ -724,8 +800,13 @@ function App() {
     normalizePath(window.location.pathname),
   );
   const storefront = useStorefrontData();
+  const [customerSession, setCustomerSession] = useState<Session | null>(null);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [cartMessage, setCartMessage] = useState("Bag is empty");
+  const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>({
+    state: "idle",
+    message: "",
+  });
   const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(
     null,
   );
@@ -735,6 +816,23 @@ function App() {
     const onPopState = () => setRoute(normalizePath(window.location.pathname));
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setCustomerSession(data.session);
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setCustomerSession(nextSession);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const navigate = (nextRoute: Route, hash = "") => {
@@ -771,19 +869,19 @@ function App() {
     const size = options?.size ?? product.selectedSize;
     const color = options?.color ?? product.colorNames[0];
     const quantity = options?.quantity ?? 1;
-    const id = `${product.name}-${size}-${color}`;
+    const cartId = `${product.id ?? product.name}-${size}-${color}`;
 
     setCartItems((items) => {
-      const existing = items.find((item) => item.id === id);
+      const existing = items.find((item) => item.cartId === cartId);
       if (existing) {
         return items.map((item) =>
-          item.id === id
+          item.cartId === cartId
             ? { ...item, quantity: item.quantity + quantity }
             : item,
         );
       }
 
-      return [...items, { ...product, id, size, color, quantity }];
+      return [...items, { ...product, cartId, size, color, quantity }];
     });
     setCartMessage(`${product.name} · ${size} · ${color} added`);
     setIsBagOpen(true);
@@ -794,7 +892,7 @@ function App() {
     setCartItems((items) =>
       items
         .map((item) =>
-          item.id === id
+          item.cartId === id
             ? { ...item, quantity: Math.max(0, item.quantity + delta) }
             : item,
         )
@@ -803,7 +901,132 @@ function App() {
   };
 
   const removeCartItem = (id: string) => {
-    setCartItems((items) => items.filter((item) => item.id !== id));
+    setCartItems((items) => items.filter((item) => item.cartId !== id));
+  };
+
+  const placeOrder = async (delivery: DeliveryDetails) => {
+    if (!isSupabaseConfigured || !supabase) {
+      setCheckoutStatus({
+        state: "idle",
+        message: "Connect Supabase before taking orders.",
+      });
+      return;
+    }
+
+    if (!customerSession) {
+      setCheckoutStatus({
+        state: "idle",
+        message: "Sign in before checkout.",
+      });
+      setIsBagOpen(false);
+      navigate("/account");
+      return;
+    }
+
+    if (cartItems.some((item) => !item.id)) {
+      setCheckoutStatus({
+        state: "idle",
+        message:
+          "Checkout needs Supabase products. Refresh after publishing products from admin.",
+      });
+      return;
+    }
+
+    try {
+      setCheckoutStatus({ state: "creating", message: "Creating order..." });
+      await loadRazorpayScript();
+      const orderResponse = await fetch("/api/create-razorpay-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${customerSession.access_token}`,
+        },
+        body: JSON.stringify({
+          delivery,
+          items: cartItems.map((item) => ({
+            productId: item.id,
+            size: item.size,
+            color: item.color,
+            quantity: item.quantity,
+          })),
+        }),
+      });
+      const orderPayload = await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(orderPayload.error || "Could not create order.");
+      }
+
+      const checkout = new window.Razorpay!({
+        key: orderPayload.keyId,
+        amount: orderPayload.amount,
+        currency: orderPayload.currency,
+        name: "Intent",
+        description: orderPayload.orderNumber,
+        order_id: orderPayload.razorpayOrderId,
+        prefill: {
+          name: orderPayload.customer?.name,
+          email: orderPayload.customer?.email,
+          contact: orderPayload.customer?.phone,
+        },
+        handler: async (response) => {
+          try {
+            setCheckoutStatus({
+              state: "verifying",
+              message: "Verifying payment...",
+            });
+            const verifyResponse = await fetch("/api/verify-razorpay-payment", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${customerSession.access_token}`,
+              },
+              body: JSON.stringify({
+                orderId: orderPayload.orderId,
+                ...response,
+              }),
+            });
+            const verifyPayload = await verifyResponse.json();
+            if (!verifyResponse.ok) {
+              throw new Error(
+                verifyPayload.error || "Payment verification failed.",
+              );
+            }
+
+            setCartItems([]);
+            setIsBagOpen(false);
+            setCartMessage(`Order ${orderPayload.orderNumber} confirmed`);
+            setCheckoutStatus({
+              state: "idle",
+              message: `Order ${orderPayload.orderNumber} confirmed.`,
+            });
+            navigate("/account");
+          } catch (error) {
+            console.error("Payment verification failed", error);
+            setCheckoutStatus({
+              state: "idle",
+              message: readableError(error),
+            });
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setCheckoutStatus({
+              state: "idle",
+              message: "Payment was not completed. The order remains pending.",
+            });
+          },
+        },
+      });
+
+      checkout.open();
+    } catch (error) {
+      console.error("Checkout failed", error);
+      setCheckoutStatus({
+        state: "idle",
+        message: readableError(error),
+      });
+    }
   };
 
   const routedPage =
@@ -822,6 +1045,7 @@ function App() {
         navigate={navigate}
         cartCount={cartCount}
         cartMessage={cartMessage}
+        session={customerSession}
         content={storefront.content}
         onOpenBag={() => setIsBagOpen(true)}
       />
@@ -864,6 +1088,9 @@ function App() {
         onClose={() => setIsBagOpen(false)}
         onUpdateQuantity={updateCartQuantity}
         onRemove={removeCartItem}
+        checkoutStatus={checkoutStatus}
+        session={customerSession}
+        onCheckout={placeOrder}
         onShop={() => {
           setIsBagOpen(false);
           navigate("/shop");
@@ -1636,6 +1863,9 @@ function BagDrawer({
   onClose,
   onUpdateQuantity,
   onRemove,
+  checkoutStatus,
+  session,
+  onCheckout,
   onShop,
 }: {
   isOpen: boolean;
@@ -1643,12 +1873,39 @@ function BagDrawer({
   onClose: () => void;
   onUpdateQuantity: (id: string, delta: number) => void;
   onRemove: (id: string) => void;
+  checkoutStatus: CheckoutStatus;
+  session: Session | null;
+  onCheckout: (delivery: DeliveryDetails) => Promise<void>;
   onShop: () => void;
 }) {
+  const [delivery, setDelivery] = useState<DeliveryDetails>({
+    name: "",
+    phone: "",
+    address: "",
+    city: "",
+    state: "",
+    pincode: "",
+  });
   const subtotal = items.reduce(
     (total, item) => total + item.priceValue * item.quantity,
     0,
   );
+
+  useEffect(() => {
+    if (!session?.user) {
+      return;
+    }
+
+    setDelivery((current) => ({
+      ...current,
+      name: current.name || session.user.user_metadata?.full_name || "",
+    }));
+  }, [session]);
+
+  const updateDelivery = (key: keyof DeliveryDetails, value: string) => {
+    setDelivery((current) => ({ ...current, [key]: value }));
+  };
+  const isCheckingOut = checkoutStatus.state !== "idle";
 
   return (
     <div
@@ -1686,7 +1943,7 @@ function BagDrawer({
           <>
             <div className="bag-items">
               {items.map((item) => (
-                <article className="bag-item" key={item.id}>
+                <article className="bag-item" key={item.cartId}>
                   <img src={item.image} alt={item.name} />
                   <div>
                     <h3>{item.name}</h3>
@@ -1697,18 +1954,18 @@ function BagDrawer({
                     <div className="bag-item-actions">
                       <button
                         type="button"
-                        onClick={() => onUpdateQuantity(item.id, -1)}
+                        onClick={() => onUpdateQuantity(item.cartId, -1)}
                       >
                         −
                       </button>
                       <span>{item.quantity}</span>
                       <button
                         type="button"
-                        onClick={() => onUpdateQuantity(item.id, 1)}
+                        onClick={() => onUpdateQuantity(item.cartId, 1)}
                       >
                         +
                       </button>
-                      <button type="button" onClick={() => onRemove(item.id)}>
+                      <button type="button" onClick={() => onRemove(item.cartId)}>
                         Remove
                       </button>
                     </div>
@@ -1716,13 +1973,92 @@ function BagDrawer({
                 </article>
               ))}
             </div>
+            <form
+              className="checkout-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onCheckout(delivery);
+              }}
+            >
+              <p className="section-label">Delivery</p>
+              <label>
+                Full name
+                <input
+                  value={delivery.name}
+                  onChange={(event) => updateDelivery("name", event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  value={delivery.phone}
+                  onChange={(event) => updateDelivery("phone", event.target.value)}
+                  inputMode="tel"
+                  required
+                />
+              </label>
+              <label className="wide-field">
+                Address
+                <textarea
+                  value={delivery.address}
+                  onChange={(event) =>
+                    updateDelivery("address", event.target.value)
+                  }
+                  required
+                />
+              </label>
+              <label>
+                City
+                <input
+                  value={delivery.city}
+                  onChange={(event) => updateDelivery("city", event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                State
+                <input
+                  value={delivery.state}
+                  onChange={(event) => updateDelivery("state", event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Pincode
+                <input
+                  value={delivery.pincode}
+                  onChange={(event) =>
+                    updateDelivery("pincode", event.target.value)
+                  }
+                  inputMode="numeric"
+                  required
+                />
+              </label>
+              {checkoutStatus.message && (
+                <p className="checkout-message">{checkoutStatus.message}</p>
+              )}
+            </form>
             <footer>
               <div>
                 <span>Subtotal</span>
                 <strong>₹{subtotal.toLocaleString("en-IN")}</strong>
               </div>
-              <button type="button" onClick={onClose}>
-                Checkout
+              <button
+                type="button"
+                disabled={isCheckingOut}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onCheckout(delivery);
+                }}
+              >
+                {isCheckingOut
+                  ? checkoutStatus.state === "verifying"
+                    ? "Verifying"
+                    : "Opening"
+                  : session
+                    ? "Pay now"
+                    : "Sign in to pay"}
               </button>
             </footer>
           </>
@@ -1950,19 +2286,92 @@ function AccountPage({
   navigate,
   cartCount,
   cartMessage,
+  session,
   content,
   onOpenBag,
 }: {
   navigate: (route: Route, hash?: string) => void;
   cartCount: number;
   cartMessage: string;
+  session: Session | null;
   content: Record<string, string>;
   onOpenBag: () => void;
 }) {
-  const recentOrders = [
-    ["#INT-2047", "Bamboo Everyday Tee", "Delivered"],
-    ["#INT-1988", "Relaxed Henley", "In transit"],
-  ];
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [orders, setOrders] = useState<CmsOrder[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+
+  const loadOrders = async () => {
+    if (!session) {
+      setOrders([]);
+      return;
+    }
+
+    setIsLoadingOrders(true);
+    try {
+      setOrders(await fetchCustomerOrders());
+    } catch (error) {
+      console.error("Failed to load customer orders", error);
+      setAuthMessage(readableError(error));
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, [session]);
+
+  const submitAuth = async () => {
+    if (!supabase) {
+      setAuthMessage("Connect Supabase before signing in.");
+      return;
+    }
+
+    setAuthMessage("");
+    const authRequest =
+      authMode === "signup"
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/account`,
+            },
+          })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    if (authRequest.error) {
+      setAuthMessage(authRequest.error.message);
+      return;
+    }
+
+    setAuthMessage(
+      authMode === "signup"
+        ? "Account created. Check your email if confirmation is enabled."
+        : "Signed in.",
+    );
+  };
+
+  const signInWithGoogle = async () => {
+    if (!supabase) {
+      setAuthMessage("Connect Supabase before signing in.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/account`,
+      },
+    });
+
+    if (error) {
+      setAuthMessage(error.message);
+    }
+  };
 
   return (
     <div className="page-shell account-page" data-name="Account page">
@@ -1978,12 +2387,18 @@ function AccountPage({
           <div>
             <p className="section-label">Account</p>
             <h1>
-              Your Intent,
-              <span>kept simple.</span>
+              {session ? "Welcome back," : "Your Intent,"}
+              <span>
+                {session
+                  ? session.user.user_metadata?.full_name ||
+                    session.user.email ||
+                    "kept simple."
+                  : "kept simple."}
+              </span>
             </h1>
             <p>
-              Sign in to track orders, save sizes, and keep your bamboo basics
-              ready for the next drop.
+              Sign in to place orders, track payment status, and keep your
+              bamboo basics ready for the next drop.
             </p>
           </div>
           <div className="account-status">
@@ -1995,38 +2410,109 @@ function AccountPage({
 
         <section className="account-grid" aria-label="Account tools">
           <article className="account-panel sign-in-panel">
-            <p className="section-label">Sign in</p>
-            <h2>Continue with email</h2>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-              }}
-            >
-              <label>
-                Email address
-                <input type="email" placeholder="you@email.com" />
-              </label>
-              <button type="submit">Send sign-in link</button>
-            </form>
-            <p>
-              Passwordless access keeps your order history and saved fit profile
-              in one place.
+            <p className="section-label">
+              {session ? "Signed in" : authMode === "signin" ? "Sign in" : "Sign up"}
             </p>
+            <h2>{session ? "Account active" : "Continue with email"}</h2>
+            {session ? (
+              <div className="account-session">
+                <p>{session.user.email}</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await supabase?.auth.signOut();
+                    setOrders([]);
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    submitAuth();
+                  }}
+                >
+                  <label>
+                    Email address
+                    <input
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      type="email"
+                      placeholder="you@email.com"
+                      autoComplete="email"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Password
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      type="password"
+                      placeholder="Minimum 6 characters"
+                      autoComplete={
+                        authMode === "signup" ? "new-password" : "current-password"
+                      }
+                      required
+                    />
+                  </label>
+                  <button type="submit">
+                    {authMode === "signin" ? "Sign in" : "Create account"}
+                  </button>
+                </form>
+                <div className="account-auth-actions">
+                  <button type="button" onClick={signInWithGoogle}>
+                    Continue with Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAuthMode((mode) =>
+                        mode === "signin" ? "signup" : "signin",
+                      )
+                    }
+                  >
+                    {authMode === "signin"
+                      ? "Create new account"
+                      : "I already have an account"}
+                  </button>
+                </div>
+              </>
+            )}
+            {authMessage && <p className="account-message">{authMessage}</p>}
           </article>
 
           <article className="account-panel">
             <p className="section-label">Orders</p>
-            <h2>Recent activity</h2>
+            <h2>{session ? "Order history" : "Sign in to view orders"}</h2>
             <div className="order-list">
-              {recentOrders.map(([id, item, status]) => (
-                <div className="order-row" key={id}>
-                  <div>
-                    <strong>{id}</strong>
-                    <span>{item}</span>
+              {isLoadingOrders ? (
+                <p>Loading orders...</p>
+              ) : orders.length ? (
+                orders.map((order) => (
+                  <div className="order-row" key={order.id}>
+                    <div>
+                      <strong>{order.order_number}</strong>
+                      <span>
+                        {order.order_items?.length ?? 0} item
+                        {(order.order_items?.length ?? 0) === 1 ? "" : "s"} · ₹
+                        {order.total.toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                    <p>{order.payment_status} · {order.order_status}</p>
                   </div>
-                  <p>{status}</p>
+                ))
+              ) : (
+                <div className="order-row empty-order-row">
+                  <div>
+                    <strong>No orders yet</strong>
+                    <span>Your confirmed orders will appear here.</span>
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
             <button type="button" onClick={() => navigate("/shop")}>
               Shop again
@@ -2275,9 +2761,10 @@ function AdminLogin({
 }
 
 function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
-  const [activeTab, setActiveTab] = useState<"products" | "content">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "content" | "orders">("products");
   const [productsList, setProductsList] = useState<ProductDetail[]>([]);
   const [contentRows, setContentRows] = useState<CmsContentRow[]>([]);
+  const [ordersList, setOrdersList] = useState<CmsOrder[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<CmsProductInput>(emptyProduct);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -2285,12 +2772,14 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   const loadAdminData = async () => {
     setIsLoading(true);
     try {
-      const [productRows, nextContent] = await Promise.all([
+      const [productRows, nextContent, nextOrders] = await Promise.all([
         fetchAllProducts(),
         fetchContentBlocks(),
+        fetchAllOrders(),
       ]);
       setProductsList(productRows.map(mapCmsProduct));
       setContentRows(nextContent);
+      setOrdersList(nextOrders);
     } catch (error) {
       console.error("Failed to load admin data", error);
       setMessage("Could not load admin data.");
@@ -2308,6 +2797,12 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   ).length;
   const draftCount = productsList.filter(
     (product) => product.status === "draft",
+  ).length;
+  const paidOrderCount = ordersList.filter(
+    (order) => order.payment_status === "paid",
+  ).length;
+  const pendingPaymentCount = ordersList.filter(
+    (order) => order.payment_status === "pending",
   ).length;
 
   return (
@@ -2341,8 +2836,16 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
           <strong>{productsList.filter((product) => product.featured).length}</strong>
         </article>
         <article>
-          <span>Content blocks</span>
-          <strong>{contentRows.length}</strong>
+          <span>Orders</span>
+          <strong>{ordersList.length}</strong>
+        </article>
+        <article>
+          <span>Paid</span>
+          <strong>{paidOrderCount}</strong>
+        </article>
+        <article>
+          <span>Pending pay</span>
+          <strong>{pendingPaymentCount}</strong>
         </article>
       </section>
 
@@ -2361,6 +2864,13 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
         >
           Content
         </button>
+        <button
+          className={activeTab === "orders" ? "active" : undefined}
+          type="button"
+          onClick={() => setActiveTab("orders")}
+        >
+          Orders
+        </button>
       </div>
 
       {message && <p className="admin-message">{message}</p>}
@@ -2377,6 +2887,14 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
             await loadAdminData();
           }}
         />
+      ) : activeTab === "orders" ? (
+        <AdminOrders
+          orders={ordersList}
+          onSaved={async (notice) => {
+            setMessage(notice);
+            await loadAdminData();
+          }}
+        />
       ) : (
         <AdminContent
           rows={contentRows}
@@ -2387,6 +2905,99 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
         />
       )}
     </div>
+  );
+}
+
+function AdminOrders({
+  orders,
+  onSaved,
+}: {
+  orders: CmsOrder[];
+  onSaved: (notice: string) => Promise<void>;
+}) {
+  const statuses: OrderStatus[] = [
+    "payment_pending",
+    "confirmed",
+    "shipped",
+    "delivered",
+    "cancelled",
+  ];
+
+  return (
+    <section className="admin-panel admin-orders">
+      <div className="admin-form-heading">
+        <div>
+          <p className="section-label">Orders</p>
+          <h2>Customer orders</h2>
+        </div>
+      </div>
+      {orders.length === 0 ? (
+        <p className="admin-message">No orders yet.</p>
+      ) : (
+        <div className="admin-order-list">
+          {orders.map((order) => (
+            <article className="admin-order-card" key={order.id}>
+              <header>
+                <div>
+                  <strong>{order.order_number}</strong>
+                  <span>
+                    {new Date(order.created_at).toLocaleString("en-IN")} · ₹
+                    {order.total.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="order-status-controls">
+                  <span>{order.payment_status}</span>
+                  <select
+                    value={order.order_status}
+                    onChange={async (event) => {
+                      await updateOrderStatus(
+                        order.id,
+                        event.target.value as OrderStatus,
+                      );
+                      await onSaved(`${order.order_number} updated.`);
+                    }}
+                  >
+                    {statuses.map((status) => (
+                      <option value={status} key={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </header>
+              <div className="admin-order-details">
+                <p>
+                  <strong>{order.customer_name}</strong>
+                  <span>{order.customer_email}</span>
+                  <span>{order.customer_phone}</span>
+                </p>
+                <p>
+                  {order.shipping_address}, {order.shipping_city},{" "}
+                  {order.shipping_state} - {order.shipping_pincode}
+                </p>
+              </div>
+              <div className="admin-order-items">
+                {(order.order_items ?? []).map((item) => (
+                  <div className="admin-order-item" key={item.id}>
+                    {item.product_image && (
+                      <img src={item.product_image} alt={item.product_name} />
+                    )}
+                    <div>
+                      <strong>{item.product_name}</strong>
+                      <span>
+                        {item.selected_color} · {item.selected_size} · Qty{" "}
+                        {item.quantity}
+                      </span>
+                    </div>
+                    <p>₹{item.line_total.toLocaleString("en-IN")}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

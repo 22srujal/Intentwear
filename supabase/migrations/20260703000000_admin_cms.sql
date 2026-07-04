@@ -249,7 +249,3 @@ insert into public.site_content (key, label, body, sort_order) values
 ('about.hero.lede', 'About hero lede', 'Why does sustainable clothing have to compromise on comfort - especially in a country that sits at 40°C for five months a year?', 120),
 ('footer.tagline', 'Footer tagline', 'Plant-based essentials for hot Indian days.', 130)
 on conflict (key) do nothing;
-
-insert into public.admin_email_allowlist (email)
-values ('your-real-email@example.com')
-on conflict (email) do nothing;

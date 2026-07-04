@@ -2,7 +2,8 @@
 
 Intentwear is a Vite + React storefront for a bamboo clothing brand. It includes
 public pages for home, shop, about, account, cart interactions, product modals,
-and a Supabase-backed admin CMS for managing products and editable site copy.
+a Supabase-backed admin CMS, customer accounts, Razorpay checkout, and order
+management.
 
 ## Tech Stack
 
@@ -37,6 +38,10 @@ Fill in `.env`:
 ```bash
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+RAZORPAY_KEY_ID=rzp_test_your-key-id
+RAZORPAY_KEY_SECRET=your-razorpay-key-secret
 ```
 
 Start the dev server:
@@ -56,10 +61,11 @@ local seeded products. The admin page requires Supabase.
 
 ## Supabase Setup
 
-Create a Supabase project, then run the migration:
+Create a Supabase project, then run the migrations:
 
 ```text
 supabase/migrations/20260703000000_admin_cms.sql
+supabase/migrations/20260704000000_orders.sql
 ```
 
 You can run it from the Supabase SQL Editor or with the Supabase CLI:
@@ -77,6 +83,8 @@ The migration creates:
 - `product_colors`
 - `product_images`
 - `site_content`
+- `orders`
+- `order_items`
 - `product-images` storage bucket
 - RLS policies and table grants
 
@@ -126,7 +134,50 @@ Admins can:
 - Upload product images to Supabase Storage
 - Edit prices, badges, categories, sizes, colors, material, and care copy
 - Edit key storefront content blocks
-- View product/content counts in the admin dashboard
+- View and update customer orders
+- View product/content/order counts in the admin dashboard
+
+## Customer Accounts and Google Sign-In
+
+The account page supports email/password sign up, email/password sign in, Google
+OAuth, and sign out.
+
+To enable Google sign-in:
+
+1. In Supabase, go to **Authentication -> Providers -> Google**.
+2. Add your Google OAuth client ID and client secret.
+3. Add redirect URLs in Supabase Auth settings:
+
+```text
+http://localhost:5173/account
+https://your-vercel-domain.vercel.app/account
+```
+
+4. In Google Cloud OAuth settings, allow the Supabase callback URL shown in the
+Supabase Google provider page.
+
+## Razorpay Checkout
+
+Orders use Razorpay Standard Checkout. Payment orders are created and verified
+through Vercel serverless functions in `api/`, so Razorpay secrets stay off the
+client.
+
+Required Vercel/server environment variables:
+
+```bash
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
+```
+
+Use Razorpay test keys while developing. Published Supabase products must have
+real product IDs; fallback local products cannot be checked out because the
+server recalculates totals from Supabase.
+
+The `/api/*` payment endpoints are Vercel serverless functions. They run on
+Vercel deployments, or locally through `vercel dev`; plain `npm run dev` only
+runs the Vite frontend.
 
 ## Available Scripts
 
@@ -156,6 +207,8 @@ Serves the production build locally.
 - `/account` - Account UI
 - `/admin/login` - Admin sign in
 - `/admin` - Protected admin CMS
+- `/api/create-razorpay-order` - Server-side Razorpay order creation
+- `/api/verify-razorpay-payment` - Server-side payment verification
 
 ## Deployment
 
@@ -169,6 +222,10 @@ For Vercel:
 ```bash
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
 ```
 
 5. Deploy.

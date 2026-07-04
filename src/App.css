@@ -466,6 +466,90 @@ a {
   color: rgba(26, 53, 40, 0.55);
 }
 
+.admin-order-list {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-order-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(26, 53, 40, 0.1);
+  border-radius: 8px;
+  background: rgba(244, 239, 230, 0.5);
+}
+
+.admin-order-card header,
+.admin-order-item,
+.order-status-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.admin-order-card header strong {
+  display: block;
+  color: var(--green);
+  font-size: 16px;
+}
+
+.admin-order-card header span,
+.admin-order-details,
+.admin-order-item span,
+.admin-order-item p {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.order-status-controls span {
+  border-radius: 999px;
+  background: rgba(26, 53, 40, 0.08);
+  padding: 6px 10px;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.order-status-controls select {
+  min-width: 170px;
+}
+
+.admin-order-details {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-order-details p {
+  margin: 0;
+}
+
+.admin-order-details p:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-order-items {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-order-item {
+  border-top: 1px solid rgba(26, 53, 40, 0.08);
+  padding-top: 10px;
+}
+
+.admin-order-item img {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 @media (max-width: 820px) {
   .admin-shell {
     padding: 16px;
@@ -1316,7 +1400,8 @@ h1 span {
   text-transform: uppercase;
 }
 
-.account-panel input[type="email"] {
+.account-panel input[type="email"],
+.account-panel input[type="password"] {
   width: 100%;
   min-height: 48px;
   border: 1px solid var(--border);
@@ -1329,6 +1414,32 @@ h1 span {
   font-weight: 300;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.account-auth-actions,
+.account-session {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.account-auth-actions button:nth-child(2),
+.account-session button {
+  border: 1px solid rgba(26, 53, 40, 0.18);
+  background: transparent;
+  color: var(--green);
+}
+
+.account-session p,
+.account-message {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.empty-order-row {
+  align-items: flex-start;
 }
 
 .account-panel button {
@@ -2923,7 +3034,8 @@ video.home-hero-image {
 
 .bag-items {
   display: grid;
-  flex: 1;
+  flex: 0 1 auto;
+  max-height: 38vh;
   align-content: start;
   gap: 18px;
   overflow-y: auto;
@@ -3009,6 +3121,60 @@ video.home-hero-image {
 
 .bag-drawer footer button {
   width: 100%;
+}
+
+.checkout-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 28px 20px;
+}
+
+.checkout-form .section-label,
+.checkout-form .wide-field,
+.checkout-message {
+  grid-column: 1 / -1;
+}
+
+.checkout-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+
+.checkout-form input,
+.checkout-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: 0;
+  background: rgba(253, 250, 245, 0.54);
+  color: var(--green);
+  padding: 10px 12px;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.checkout-form textarea {
+  min-height: 62px;
+  resize: vertical;
+}
+
+.checkout-message {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.bag-drawer footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 @keyframes fade-in {

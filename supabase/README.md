@@ -1,7 +1,9 @@
 # Intent Supabase Setup
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/20260703000000_admin_cms.sql` in the Supabase SQL editor or with the Supabase CLI.
+2. Run both migrations in the Supabase SQL editor or with the Supabase CLI:
+   - `supabase/migrations/20260703000000_admin_cms.sql`
+   - `supabase/migrations/20260704000000_orders.sql`
 3. Add your first admin email before creating/signing into that user:
 
 ```sql

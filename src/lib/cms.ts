@@ -67,10 +67,60 @@ export type CmsProfile = {
   role: "admin" | "customer";
 };
 
+export type OrderStatus =
+  | "payment_pending"
+  | "confirmed"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+
+export type PaymentStatus = "pending" | "paid" | "failed";
+
+export type CmsOrderItem = {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  product_name: string;
+  product_image: string | null;
+  selected_size: string;
+  selected_color: string;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+};
+
+export type CmsOrder = {
+  id: string;
+  order_number: string;
+  user_id: string;
+  customer_email: string | null;
+  customer_name: string;
+  customer_phone: string;
+  shipping_address: string;
+  shipping_city: string;
+  shipping_state: string;
+  shipping_pincode: string;
+  subtotal: number;
+  total: number;
+  currency: string;
+  order_status: OrderStatus;
+  payment_status: PaymentStatus;
+  razorpay_order_id: string | null;
+  razorpay_payment_id: string | null;
+  created_at: string;
+  updated_at: string;
+  order_items?: CmsOrderItem[];
+};
+
 export const productSelect = `
   *,
   product_images(url, alt, sort_order),
   product_colors(name, hex, sort_order)
+`;
+
+const orderSelect = `
+  *,
+  order_items(*)
 `;
 
 export async function fetchPublishedProducts() {
@@ -123,6 +173,55 @@ export async function fetchContentBlocks() {
   }
 
   return (data ?? []) as CmsContentRow[];
+}
+
+export async function fetchCustomerOrders() {
+  if (!supabase) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(orderSelect)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as CmsOrder[];
+}
+
+export async function fetchAllOrders() {
+  if (!supabase) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(orderSelect)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as CmsOrder[];
+}
+
+export async function updateOrderStatus(orderId: string, status: OrderStatus) {
+  if (!supabase) {
+    throw new Error("Supabase is not configured.");
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ order_status: status })
+    .eq("id", orderId);
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function fetchAdminProfile(userId: string) {
